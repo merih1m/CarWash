@@ -1,0 +1,8 @@
+aiogram==3.13.1
+asyncpg==0.29.0
+python-dotenv==1.0.1
+pydantic==2.9.2
+typing-extensions==4.12.2
+fastapi==0.109.2
+uvicorn==0.23.2
+aiohttp==3.9.5
