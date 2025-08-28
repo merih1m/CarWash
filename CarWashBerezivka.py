@@ -429,7 +429,6 @@ async def start_wash(message: types.Message):
     )
     await message.answer(f"✅ Мийка {booking_id} почалась!")
 
-# --- /finish_wash ---
 @router.message(Command("finish_wash"))
 async def finish_wash(message: types.Message):
     if not await is_admin(message.from_user.id):
@@ -466,7 +465,8 @@ async def finish_wash(message: types.Message):
     await message.answer(f"✅ Мийка {booking_id} завершена!")
 
     # Повідомлення наступних у черзі після BUFFER
-    await notify_next_after_buffer()
+    await notify_next_after_buffer(booking_id)
+
 
 @router.message(Command("show_statistic"))
 async def show_statistic(message: types.Message):
@@ -668,25 +668,51 @@ async def show_booking(message: types.Message):
         await message.answer("❌ Немає прав")
         return
 
-    # Беремо всі бронювання, які ще не завершені
-    rows = await db_fetch(
-        """
+    parts = message.text.split(maxsplit=1)
+    filter_clause = ""
+    params = []
+    include_finished = False
+
+    if len(parts) > 1:
+        arg = parts[1]
+        include_finished = True  # якщо вказаний параметр → показуємо finished теж
+
+        # Спробуємо розпізнати дату (dd.mm.yyyy)
+        try:
+            date = datetime.strptime(arg, "%d.%m.%Y").date()
+            filter_clause = "AND b.booking_datetime::date = $1"
+            params.append(date)
+        except ValueError:
+            # Якщо це число → вважаємо user_id
+            if arg.isdigit():
+                filter_clause = "AND b.user_id = $1"
+                params.append(int(arg))
+            else:
+                # Інакше фільтруємо по номеру авто (LIKE)
+                filter_clause = "AND b.car_number ILIKE $1"
+                params.append(f"%{arg}%")
+
+    # якщо параметрів нема → показуємо лише активні
+    status_condition = "" if include_finished else "AND b.status != 'finished'"
+
+    query = f"""
         SELECT b.id, b.user_id, b.username, b.phone_number, p.name AS program_name,
                b.car_number, b.booking_datetime, b.status, b.actual_start, b.actual_end
         FROM bookings b
         LEFT JOIN programs p ON p.id = b.program_id
-        WHERE b.status != 'finished'
+        WHERE TRUE {status_condition} {filter_clause}
         ORDER BY
             CASE WHEN b.status='in_progress' THEN 0 ELSE 1 END,
-            b.id ASC
-        """
-    )
+            b.booking_datetime ASC
+    """
+
+    rows = await db_fetch(query, *params)
 
     if not rows:
-        await message.answer("📭 Немає активних бронювань")
+        await message.answer("📭 Немає бронювань за цим фільтром")
         return
 
-    text = "📋 Активні бронювання:\n\n"
+    text = "📋 Бронювання:\n\n"
     for r in rows:
         booking_time = r["booking_datetime"]
         status = r["status"]
@@ -705,7 +731,6 @@ async def show_booking(message: types.Message):
         )
 
     await message.answer(text)
-
 
 @router.message(Command("delete"))
 async def delete_booking(message: types.Message):
@@ -1000,4 +1025,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
